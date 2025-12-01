@@ -1,0 +1,172 @@
+---
+title: "Diabetes Health Indicators: EDA"
+author: Shohn Godboldt 
+format:
+  html:
+    theme: cosmo
+    toc: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r}
+library(tidyverse)
+library(janitor)
+
+diab <- read_csv("diabetes_binary_health_indicators_BRFSS2015.csv") |>
+  clean_names()
+
+glimpse(diab)
+```
+
+
+## Data Preparation
+Here I describe the key variables I will focus on in this EDA:
+
+- **diabetes_binary** — 0 = no diabetes, 1 = diabetes (converted to factor with labels)  
+- **bmi** — Body mass index  
+- **high_bp** — Indicator for high blood pressure  
+- **high_chol** — Indicator for high cholesterol  
+- **chol_check** — Had cholesterol checked in past 5 years  
+- **smoker** — Smoked at least 100 cigarettes in lifetime  
+- **stroke** — Ever diagnosed with stroke  
+- **heart_diseaseor_attack** — Coronary heart disease or myocardial infarction  
+- **phys_activity** — Any physical activity in past 30 days  
+- **gen_hlth** — Self-rated general health (1 = excellent, 5 = poor)
+
+```{r}
+# Convert important variables to factors for easier plotting/modeling
+diab <- diab |>
+  mutate(
+    diabetes_binary = factor(diabetes_binary, levels = c(0, 1),
+                             labels = c("NoDiabetes", "Diabetes")),
+    high_bp = factor(high_bp),
+    high_chol = factor(high_chol),
+    chol_check = factor(chol_check),
+    smoker = factor(smoker),
+    stroke = factor(stroke),
+    heart_diseaseor_attack = factor(heart_diseaseor_attack),
+    phys_activity = factor(phys_activity),
+    gen_hlth = factor(gen_hlth, ordered = TRUE)
+  )
+
+```
+
+
+## Missing Data Overview
+
+Here I check for missing values in the dataset. This helps me understand whether any variables need special handling before modeling.
+
+```{r}
+diab |>
+  summarise(across(everything(), ~ sum(is.na(.)))) |>
+  pivot_longer(everything(),
+               names_to = "variable",
+               values_to = "n_missing") |>
+  arrange(desc(n_missing)) |>
+  head(15)
+```
+
+
+## BMI Distribution by Diabetes Status
+
+BMI is one of the strongest health indicators of diabetes risk.  
+Here I compare BMI distributions between individuals with and without diabetes.
+
+### Interpretation:
+Individuals with diabetes tend to show a BMI distribution that is shifted slightly higher than those without diabetes.
+This suggests BMI is a strong predictor to include in the modeling step
+
+```{r}
+diab |>
+  ggplot(aes(x = bmi, fill = diabetes_binary)) +
+  geom_histogram(bins = 40, alpha = 0.6, position = "identity") +
+  labs(title = "BMI Distribution by Diabetes Status",
+       x = "BMI",
+       y = "Count",
+       fill = "Diabetes Status")
+```
+
+## Plot 2: General Health vs Diabetes (Proportion Bar Chart)
+
+### Self-Rated General Health vs Diabetes
+
+Self-rated general health (`gen_hlth`) ranges from 1 = excellent to 5 = poor.  
+Here I examine how the proportions of diabetes differ across these health categories.
+
+### Interpretation:
+People reporting poorer health (values 4–5) show a noticeably higher proportion of diabetes.
+This variable clearly carries meaningful predictive information
+
+```{r}
+diab |>
+  ggplot(aes(x = gen_hlth, fill = diabetes_binary)) +
+  geom_bar(position = "fill") +
+  labs(title = "Proportion of Diabetes Across General Health Ratings",
+       x = "General Health (1 = Excellent, 5 = Poor)",
+       y = "Proportion",
+       fill = "Diabetes Status")
+```
+
+
+## Plot 3: Physical Activity vs Diabetes
+
+## Physical Activity and Diabetes
+
+Physical activity is an important behavioral factor.  
+Here I compare diabetes rates between those who reported physical activity in the past 30 days vs those who did not.
+
+### Interpretation:
+Individuals who report no physical activity tend to have a higher proportion of diabetes.
+This suggests physical activity is a meaningful behavioral predictor.
+
+```{r}
+diab |>
+  ggplot(aes(x = phys_activity, fill = diabetes_binary)) +
+  geom_bar(position = "fill") +
+  labs(title = "Physical Activity and Diabetes",
+       x = "Physical Activity (0 = No, 1 = Yes)",
+       y = "Proportion",
+       fill = "Diabetes Status")
+```
+
+
+## Plot 4: High Blood Pressure vs Diabetes
+
+## High Blood Pressure and Diabetes
+
+High blood pressure often co-occurs with diabetes.  
+Here I visualize the relationship.
+
+### Interpretation:
+The proportion of individuals with diabetes is substantially higher among those with high blood pressure.
+This confirms high_bp as a strong candidate predictor in the modeling stage.
+
+```{r}
+diab |>
+  ggplot(aes(x = high_bp, fill = diabetes_binary)) +
+  geom_bar(position = "fill") +
+  labs(title = "High Blood Pressure and Diabetes",
+       x = "High Blood Pressure (0 = No, 1 = Yes)",
+       y = "Proportion",
+       fill = "Diabetes Status")
+```
+
+## Summary of Findings
+
+From this exploratory analysis, several important patterns emerged:
+
+- Individuals with diabetes tend to have **higher BMI** on average.  
+- Poorer self-rated general health (values 4–5) is associated with a **higher proportion of diabetes**.  
+- Lack of physical activity corresponds to a **higher diabetes rate**, suggesting behavioral predictors play a role.  
+- High blood pressure shows a strong relationship with diabetes, supporting its inclusion as a predictive variable.  
+
+Overall, the patterns suggest that both lifestyle factors (physical activity, BMI) and clinical indicators (high blood pressure, general health rating) will be important predictors during model building.
+
+I will now move to the modeling portion, where I will construct and evaluate classification models to predict diabetes status.
+
+[Proceed to the Modeling Analysis](Modeling.html)
+
+

@@ -1,0 +1,229 @@
+---
+title: "Diabetes Health Indicators: Predictive Modeling"
+author: Shohn Godboldt
+format:
+  html:
+    theme: cosmo
+    toc: true
+execute:
+  echo: TRUE
+  warning: FALSE
+  message: FALSE
+---
+## Introduction
+
+In this document, I build predictive models to classify individuals as having Diabetes or No Diabetes using the BRFSS 2015 health indicators dataset. I will compare a classification tree and a random forest model using a train/test split and log-loss as the primary evaluation metric.
+
+```{r}
+library(tidyverse)
+library(janitor)
+library(tidymodels)
+library(yardstick)
+
+set.seed(123)
+
+# Load and clean data (same as EDA)
+diab <- read_csv("diabetes_binary_health_indicators_BRFSS2015.csv") |>
+  clean_names() |>
+  mutate(
+    diabetes_binary = factor(diabetes_binary, levels = c(0, 1),
+                             labels = c("NoDiabetes", "Diabetes")),
+    high_bp = factor(high_bp),
+    high_chol = factor(high_chol),
+    chol_check = factor(chol_check),
+    smoker = factor(smoker),
+    stroke = factor(stroke),
+    heart_diseaseor_attack = factor(heart_diseaseor_attack),
+    phys_activity = factor(phys_activity),
+    gen_hlth = factor(gen_hlth, ordered = TRUE)
+  )
+
+tidymodels_prefer()
+```
+
+
+## Train/Test Split
+
+I use a 70/30 split and stratify on the outcome so that the proportion of diabetes cases is similar in both training and testing sets.
+
+```{r}
+set.seed(123)
+diab_split <- initial_split(diab, prop = 0.7, strata = diabetes_binary)
+diab_train <- training(diab_split)
+diab_test  <- testing(diab_split)
+```
+
+## Modeling Recipe 
+For simplicity, I focus on a subset of important predictors identified from the EDA. This recipe defines the outcome and predictors and normalizes the numeric variable bmi.
+
+```{r}
+diab_recipe <- recipe(diabetes_binary ~ bmi + high_bp + high_chol +
+phys_activity + gen_hlth,
+data = diab_train) |>
+step_normalize(all_numeric_predictors())
+
+diab_recipe
+```
+
+## Cross-Validation Setup and Metrics
+
+I use 5-fold cross-validation on the training data and evaluate models with **log-loss** as the primary metric, plus ROC AUC and accuracy for additional context.
+
+```{r}
+set.seed(123)
+diab_folds <- vfold_cv(diab_train, v = 3, strata = diabetes_binary)
+
+logloss_metrics <- metric_set(mn_log_loss)
+
+diab_folds
+```
+
+## Classification Tree Model
+
+A classification tree recursively splits the predictor space into regions using simple rules (like thresholds on BMI or health scores). The goal is to find splits that separate individuals with and without diabetes as well as possible.
+
+```{r}
+tree_spec <- decision_tree(
+  cost_complexity = tune(),
+  tree_depth = tune(),
+  min_n = tune()
+) |>
+  set_mode("classification") |>
+  set_engine("rpart")
+
+tree_wf <- workflow() |>
+  add_model(tree_spec) |>
+  add_recipe(diab_recipe)
+
+tree_wf
+```
+
+## Tuning the Tree Using Cross-Validation
+
+I tune the tree hyperparameters using 5-fold cross-validation on the training data, evaluating with **mn_log_loss** (multinomial log-loss) as the primary metric.
+
+```{r tree_tune, cache=TRUE}
+tree_grid <- grid_regular(
+  cost_complexity(range = c(-3, -1)),
+  tree_depth(range = c(3L, 8L)),
+  min_n(range = c(10L, 40L)),
+  levels = 2
+)
+
+set.seed(123)
+tree_res <- tune_grid(
+  tree_wf,
+  resamples = diab_folds,
+  grid = tree_grid,
+  metrics = logloss_metrics
+)
+
+tree_res
+```
+
+## Best Tree Based on Log-Loss
+
+I select the tree with the **lowest mn_log_loss**.
+
+```{r}
+tree_best <- select_best(tree_res, metric = "mn_log_loss")
+tree_best
+
+tree_final_wf <- finalize_workflow(tree_wf, tree_best)
+
+# Fit finalized tree on the training data
+tree_final_fit <- fit(tree_final_wf, data = diab_train)
+tree_final_fit
+```
+
+## Test Set Performance: Classification Tree
+
+Here I evaluate the tuned tree on the held-out test data and compute log-loss, ROC AUC, and accuracy.
+
+```{r}
+# Get predicted probabilities and classes on test data
+tree_test_preds <- predict(tree_final_fit, diab_test, type = "prob") |>
+  bind_cols(predict(tree_final_fit, diab_test, type = "class")) |>
+  bind_cols(diab_test |> select(diabetes_binary))
+
+# Look at the column names to confirm probabilities
+names(tree_test_preds)
+
+# Compute log-loss for the Diabetes class
+tree_test_metrics <- logloss_metrics(
+  tree_test_preds,
+  truth = diabetes_binary,
+  .pred_Diabetes
+)
+
+tree_test_metrics
+```
+
+## Random Forest Model
+
+A random forest is an ensemble of many decision trees. Each tree is fit on a bootstrap sample of the data and uses a random subset of predictors at each split. This tends to reduce variance and improve predictive performance compared to a single tree.
+```{r}
+rf_spec <- rand_forest(
+  mtry = tune(),
+  min_n = tune(),
+  trees = 200
+) |>
+  set_mode("classification") |>
+  set_engine("ranger")
+
+rf_wf <- workflow() |>
+  add_model(rf_spec) |>
+  add_recipe(diab_recipe)
+
+rf_wf
+```
+
+## Tuning the Random Forest Using Cross-Validation
+```{r rf_tune, cache=TRUE}
+rf_grid <- grid_regular(
+  mtry(range = c(2L, 4L)),
+  min_n(range = c(5L, 25L)),
+  levels = 2
+)
+
+set.seed(123)
+rf_res <- tune_grid(
+  rf_wf,
+  resamples = diab_folds,
+  grid = rf_grid,
+  metrics = logloss_metrics
+)
+
+rf_res
+```
+
+## Best Random Forest Based on Log-Loss
+```{r}
+rf_best <- select_best(rf_res, metric = "mn_log_loss")
+rf_best
+
+rf_final_wf <- finalize_workflow(rf_wf, rf_best)
+
+rf_final_fit <- fit(rf_final_wf, data = diab_train)
+rf_final_fit
+```
+
+## Test Set Performance: Random Forest
+```{r}
+rf_test_preds <- predict(rf_final_fit, diab_test, type = "prob") |>
+  bind_cols(predict(rf_final_fit, diab_test, type = "class")) |>
+  bind_cols(diab_test |> select(diabetes_binary))
+
+names(rf_test_preds)
+
+rf_test_metrics <- logloss_metrics(
+  rf_test_preds,
+  truth = diabetes_binary,
+  .pred_Diabetes
+)
+
+rf_test_metrics
+```
+
+
+

@@ -225,5 +225,26 @@ rf_test_metrics <- logloss_metrics(
 rf_test_metrics
 ```
 
+## Model Comparison on Test Data
+
+Here I compare the tuned classification tree and random forest models using **mn_log_loss** on the held-out test set.
+
+```{r}
+model_compare <- bind_rows(
+  tree_test_metrics |> mutate(model = "Classification Tree"),
+  rf_test_metrics   |> mutate(model = "Random Forest")
+)
+
+model_compare
+```
+
+## Final Model Selection
+
+Based on the test set performance, the **classification tree** achieves a lower mn_log_loss (2.07) compared to the random forest model (2.32). Because mn_log_loss measures the quality of predicted probabilities, a lower value indicates better-calibrated predictions and overall improved performance.
+
+Therefore, I select the **classification tree** as my final model. This model provides more accurate probability estimates for diabetes status on the held-out test data and will be used in the next step when I train on the full dataset and build the API endpoints.
+
+
+[Back to the Exploratory Data Analysis](EDA.html)
 
 
